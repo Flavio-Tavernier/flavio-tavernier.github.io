@@ -1,3 +1,8 @@
 #map { 
     height: 580px;
 }
+
+.leaflet-interactive:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
