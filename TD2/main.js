@@ -5,6 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // Creating the scene
 const scene = new THREE.Scene();
+scene.background = new THREE.Color('#FF9482');
+scene.fog = new THREE.Fog(0xcccccc, 50, 300);
 const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
 
 const renderer = new THREE.WebGLRenderer();
@@ -23,7 +25,7 @@ const material = new THREE.MeshStandardMaterial( { map: texture } );
 const sphere  = new THREE.Mesh( geometry, material );
 scene.add(sphere);
 
-camera.position.z = 100;
+camera.position.z = 150;
 
 // Creating the light
 const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
