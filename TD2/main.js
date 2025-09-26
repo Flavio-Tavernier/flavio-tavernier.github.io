@@ -51,6 +51,15 @@ gltfLoader.load(
 );
 
 
+const groundGeometry = new THREE.PlaneGeometry(200, 200);
+const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xF0E67A }); // gris clair
+const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+ground.rotation.x = - Math.PI / 2; // incliner le plan à plat
+ground.position.y = -10; // le placer sous la sphère
+ground.receiveShadow = true; // si tu actives les ombres
+scene.add(ground);
+
+
 const controls = new OrbitControls(camera, renderer.domElement);
 
 // Rendering the scene
