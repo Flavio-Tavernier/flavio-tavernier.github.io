@@ -1,4 +1,4 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js';
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js'; 
 import * as L from 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.esm.js';
 
 async function setupCameraVideo() {
@@ -69,6 +69,26 @@ async function requestGeolocationPermission() {
   });
 }
 
+async function requestOrientationPermission() {
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const response = await DeviceOrientationEvent.requestPermission();
+      if (response === 'granted') {
+        return true;
+      } else {
+        alert("Permission orientation refusée");
+        return false;
+      }
+    } catch (err) {
+      alert("Erreur demande permission orientation: " + err);
+      return false;
+    }
+  } else {
+    // Pas besoin de permission
+    return true;
+  }
+}
+
 async function main() {
   const coordsDiv = document.getElementById('coords');
 
@@ -113,15 +133,16 @@ async function main() {
   let objGeoLat = latRef + objGeoLatOffset;
   let objGeoLon = lonRef;
 
-  const frustum = new THREE.Frustum();
-  const cameraViewProjectionMatrix = new THREE.Matrix4();
-
-  // Orientation absolue (alpha = rotation autour Z)
-  window.addEventListener('deviceorientationabsolute', (e) => {
-    if (e.absolute === true && e.alpha !== null) {
-      userHeading = e.alpha;
-    }
-  });
+  // Demande permission orientation puis écoute l'événement
+  const orientationAllowed = await requestOrientationPermission();
+  if (orientationAllowed) {
+    window.addEventListener('deviceorientationabsolute', (e) => {
+      if (e.absolute === true && e.alpha !== null) {
+        // Inversion de l'angle alpha pour que 0° soit au nord
+        userHeading = 360 - e.alpha;
+      }
+    });
+  }
 
   navigator.geolocation.watchPosition(pos => {
     userLat = pos.coords.latitude;
@@ -153,24 +174,20 @@ async function main() {
 
       const pos = latLonToMeters(latRef, lonRef, objGeoLat, objGeoLon);
 
-      const headingRad = THREE.MathUtils.degToRad(userHeading);
-
+      // Positionne la caméra au centre (origine)
       camera.position.set(0, 0, 0);
-      camera.rotation.set(0, 0, 0);
 
-      // On fait tourner la scène inverse à l’orientation pour simuler la direction regardée
-      scene.rotation.y = -headingRad;
+      // Applique la rotation selon l'orientation de l'utilisateur
+      camera.rotation.set(0, THREE.MathUtils.degToRad(userHeading), 0);
 
+      // Positionne le cube par rapport au point de référence
       cube.position.set(pos.x, 0, pos.z);
+
+      // On peut forcer la visibilité pour le debug
+      cube.visible = true;
 
       camera.updateMatrix();
       camera.updateMatrixWorld();
-      camera.matrixWorldInverse.getInverse(camera.matrixWorld);
-
-      cameraViewProjectionMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      frustum.setFromProjectionMatrix(cameraViewProjectionMatrix);
-
-      cube.visible = frustum.containsPoint(cube.position);
     }
 
     renderer.render(scene, camera);
