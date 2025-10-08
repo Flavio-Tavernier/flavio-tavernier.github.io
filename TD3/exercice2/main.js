@@ -1,18 +1,8 @@
-// index.js
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js';
+import * as L from 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.esm.js';
 
 async function setupCameraVideo() {
-  const video = document.createElement('video');
-  video.style.position = 'fixed';
-  video.style.top = '0';
-  video.style.left = '0';
-  video.style.width = '100vw';
-  video.style.height = '100vh';
-  video.style.objectFit = 'cover';
-  video.style.zIndex = '-1'; // Derrière tout
-  video.autoplay = true;
-  video.playsInline = true; // iPhone requirement
-  document.body.appendChild(video);
-
+  const video = document.getElementById('camvideo');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     video.srcObject = stream;
@@ -22,17 +12,6 @@ async function setupCameraVideo() {
 }
 
 function setupMap() {
-  const mapDiv = document.createElement('div');
-  mapDiv.id = 'map';
-  mapDiv.style.position = 'fixed';
-  mapDiv.style.bottom = '10px';
-  mapDiv.style.left = '10px';
-  mapDiv.style.width = '150px';
-  mapDiv.style.height = '150px';
-  mapDiv.style.zIndex = '1000';
-  mapDiv.style.border = '2px solid white';
-  document.body.appendChild(mapDiv);
-
   const map = L.map('map', {
     zoomControl: false,
     attributionControl: false,
@@ -44,18 +23,11 @@ function setupMap() {
 }
 
 function setupThree() {
-  const threeCanvas = document.createElement('canvas');
-  threeCanvas.style.position = 'fixed';
-  threeCanvas.style.top = '0';
-  threeCanvas.style.left = '0';
-  threeCanvas.style.width = '100vw';
-  threeCanvas.style.height = '100vh';
-  threeCanvas.style.pointerEvents = 'none'; // click à travers
-  threeCanvas.style.zIndex = '10';
+  const canvas = document.createElement('canvas');
+  canvas.id = 'three-canvas';
+  document.body.appendChild(canvas);
 
-  document.body.appendChild(threeCanvas);
-
-  const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
 
@@ -64,7 +36,6 @@ function setupThree() {
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
   camera.position.set(0, 0, 0);
 
-  // Lumière simple
   const light = new THREE.DirectionalLight(0xffffff, 1);
   light.position.set(0, 10, 10);
   scene.add(light);
@@ -72,8 +43,9 @@ function setupThree() {
   return { renderer, scene, camera };
 }
 
+// Convert lat/lon difference to meters in local flat coords (x East, z North)
 function latLonToMeters(latRef, lonRef, lat, lon) {
-  const earthRadius = 6378137; // m
+  const earthRadius = 6378137; // meters
   const dLat = THREE.MathUtils.degToRad(lat - latRef);
   const dLon = THREE.MathUtils.degToRad(lon - lonRef);
 
@@ -98,21 +70,9 @@ async function requestGeolocationPermission() {
 }
 
 async function main() {
-  await setupCameraVideo();
+  const coordsDiv = document.getElementById('coords');
 
-  const waitingMsg = document.createElement('div');
-  waitingMsg.style.position = 'fixed';
-  waitingMsg.style.top = '50%';
-  waitingMsg.style.left = '50%';
-  waitingMsg.style.transform = 'translate(-50%, -50%)';
-  waitingMsg.style.color = 'white';
-  waitingMsg.style.fontSize = '1.5rem';
-  waitingMsg.style.backgroundColor = 'rgba(0,0,0,0.5)';
-  waitingMsg.style.padding = '1rem 2rem';
-  waitingMsg.style.borderRadius = '8px';
-  waitingMsg.style.zIndex = '2000';
-  waitingMsg.textContent = 'En attente de géolocalisation...';
-  document.body.appendChild(waitingMsg);
+  await setupCameraVideo();
 
   let userLat = 0;
   let userLon = 0;
@@ -129,9 +89,11 @@ async function main() {
     latRef = userLat;
     lonRef = userLon;
     refSet = true;
+
+    coordsDiv.textContent = `Position GPS initiale : ${latRef.toFixed(6)}, ${lonRef.toFixed(6)}`;
   } catch (e) {
     alert('Erreur ou refus permission géolocalisation : ' + e.message);
-    waitingMsg.textContent = 'Erreur géolocalisation';
+    coordsDiv.textContent = 'Erreur géolocalisation';
     return;
   }
 
@@ -140,28 +102,27 @@ async function main() {
 
   const { renderer, scene, camera } = setupThree();
 
-  // Création cube rouge 3D
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  // Cube 3D rouge
+  const geometry = new THREE.BoxGeometry(1,1,1);
   const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
   const cube = new THREE.Mesh(geometry, material);
   scene.add(cube);
 
-  const frustum = new THREE.Frustum();
-  const cameraViewProjectionMatrix = new THREE.Matrix4();
-
-  // Position du cube à 5m au nord du point référence
-  const objGeoLatOffset = 0.000045; // ~5m latitude
+  // Position cube à environ 5m au nord du point de référence
+  const objGeoLatOffset = 0.000045; // ~5m en latitude
   let objGeoLat = latRef + objGeoLatOffset;
   let objGeoLon = lonRef;
 
-  // Ecoute orientation absolue (alpha = rotation Z)
-  window.addEventListener('deviceorientationabsolute', e => {
+  const frustum = new THREE.Frustum();
+  const cameraViewProjectionMatrix = new THREE.Matrix4();
+
+  // Orientation absolue (alpha = rotation autour Z)
+  window.addEventListener('deviceorientationabsolute', (e) => {
     if (e.absolute === true && e.alpha !== null) {
       userHeading = e.alpha;
     }
   });
 
-  // Met à jour la position GPS régulièrement
   navigator.geolocation.watchPosition(pos => {
     userLat = pos.coords.latitude;
     userLon = pos.coords.longitude;
@@ -171,12 +132,13 @@ async function main() {
       lonRef = userLon;
       map.setView([latRef, lonRef], 18);
       refSet = true;
-      waitingMsg.remove();
     }
 
+    coordsDiv.textContent = `Position GPS : ${userLat.toFixed(6)}, ${userLon.toFixed(6)}`;
     map.setView([userLat, userLon]);
   }, err => {
     console.error('Erreur géoloc:', err);
+    coordsDiv.textContent = 'Erreur géolocalisation';
   }, {
     enableHighAccuracy: true,
     maximumAge: 1000
@@ -186,7 +148,6 @@ async function main() {
     requestAnimationFrame(animate);
 
     if (refSet) {
-      // Actualiser position cube si ref bouge (rare)
       objGeoLat = latRef + objGeoLatOffset;
       objGeoLon = lonRef;
 
@@ -197,6 +158,7 @@ async function main() {
       camera.position.set(0, 0, 0);
       camera.rotation.set(0, 0, 0);
 
+      // On fait tourner la scène inverse à l’orientation pour simuler la direction regardée
       scene.rotation.y = -headingRad;
 
       cube.position.set(pos.x, 0, pos.z);
@@ -213,6 +175,7 @@ async function main() {
 
     renderer.render(scene, camera);
   }
+
   animate();
 
   window.addEventListener('resize', () => {
