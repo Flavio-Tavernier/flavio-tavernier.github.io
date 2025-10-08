@@ -1,0 +1,23 @@
+body {
+    margin: 0;
+}
+
+#container {
+    display: flex;
+    flex-direction: row;
+}
+
+#three-container {
+    width: 100vw;
+    height: 100vh;
+} 
+
+#map {
+    position: absolute;
+    width: 30%;
+    height: 30%;
+    z-index: 100;
+    border-radius: 12px;
+    margin-top: 12px;
+    margin-left: 12px;
+}
