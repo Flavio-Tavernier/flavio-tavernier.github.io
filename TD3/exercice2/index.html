@@ -14,6 +14,11 @@
 </head>
 <body>
 
+    <video id="camvideo" autoplay playsinline style="position:fixed; top:0; left:0; width:100%; height:100%; object-fit:cover; z-index:-1;"></video>
+    <div id="coords" style="position:fixed; top:10px; left:10px; color:white; background:black; padding:5px; z-index:10;"></div>
+    <div id="map" style="position:fixed; bottom:0; right:0; width:200px; height:200px; z-index:10;"></div>
+
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""></script>
