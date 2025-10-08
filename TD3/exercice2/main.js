@@ -1,8 +1,9 @@
 // index.js
 
-import * as THREE from 'three';
+// IMPORTANT :
+// - En mode simple sans bundler, on suppose que 'THREE' et 'L' (Leaflet) sont chargés via CDN dans HTML
+// - Donc pas d'import ici, on utilise les objets globaux THREE et L
 
-// Setup caméra vidéo
 async function setupCameraVideo() {
   const video = document.createElement('video');
   video.style.position = 'fixed';
@@ -13,7 +14,7 @@ async function setupCameraVideo() {
   video.style.objectFit = 'cover';
   video.style.zIndex = '-1'; // Derrière tout
   video.autoplay = true;
-  video.playsInline = true; // important pour iPhone
+  video.playsInline = true; // iPhone requirement
   document.body.appendChild(video);
 
   try {
@@ -24,7 +25,6 @@ async function setupCameraVideo() {
   }
 }
 
-// Setup carte Leaflet
 function setupMap() {
   const mapDiv = document.createElement('div');
   mapDiv.id = 'map';
@@ -42,13 +42,11 @@ function setupMap() {
     attributionControl: false,
   }).setView([0, 0], 15);
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
   return map;
 }
 
-// Setup Three.js scène en overlay
 function setupThree() {
   const threeCanvas = document.createElement('canvas');
   threeCanvas.style.position = 'fixed';
@@ -78,10 +76,9 @@ function setupThree() {
   return { renderer, scene, camera };
 }
 
-// Conversion approximative de lat/lon en coordonnées 3D locales
-// (en mètres, par rapport au point de référence)
+// Convertit lat/lon en coordonnées 3D relatives (mètres) par rapport à un point référence
 function latLonToMeters(latRef, lonRef, lat, lon) {
-  const earthRadius = 6378137; // en mètres
+  const earthRadius = 6378137; // m
   const dLat = THREE.MathUtils.degToRad(lat - latRef);
   const dLon = THREE.MathUtils.degToRad(lon - lonRef);
 
@@ -101,12 +98,21 @@ async function main() {
   let userLon = 0;
   let userHeading = 0;
 
-  // Point de référence = position utilisateur initiale
   let refSet = false;
   let latRef = 0;
   let lonRef = 0;
 
-  // Géolocalisation en temps réel
+  // Création du cube 3D rouge
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+  const cube = new THREE.Mesh(geometry, material);
+  scene.add(cube);
+
+  // Frustum caméra pour test visibilité
+  const frustum = new THREE.Frustum();
+  const cameraViewProjectionMatrix = new THREE.Matrix4();
+
+  // Mise à jour position GPS
   navigator.geolocation.watchPosition(pos => {
     userLat = pos.coords.latitude;
     userLon = pos.coords.longitude;
@@ -118,9 +124,7 @@ async function main() {
       refSet = true;
     }
 
-    // Mise à jour carte
     map.setView([userLat, userLon]);
-
   }, err => {
     console.error('Erreur géoloc:', err);
   }, {
@@ -128,49 +132,58 @@ async function main() {
     maximumAge: 1000
   });
 
-  // Orientation smartphone (alpha = rotation autour axe Z)
+  // Récupérer orientation absolue (alpha = rotation Z)
   window.addEventListener('deviceorientationabsolute', e => {
     if (e.absolute === true && e.alpha !== null) {
-      userHeading = e.alpha; // degré 0-360
+      userHeading = e.alpha;
     }
   });
 
-  // Objet géolocalisé 3D à afficher (ex: cube)
-  // On va créer un cube à 5 mètres au nord du point de référence
-  const objGeoLat = latRef + 0.000045; // approx 5m au nord (0.000009 = ~1m)
-  const objGeoLon = lonRef;
-
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
-  const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-  const cube = new THREE.Mesh(geometry, material);
-  scene.add(cube);
+  // Position du cube à 5m au nord du point de référence
+  const objGeoLatOffset = 0.000045; // environ 5m
+  let objGeoLat = latRef + objGeoLatOffset;
+  let objGeoLon = lonRef;
 
   // Update loop Three.js
   function animate() {
     requestAnimationFrame(animate);
 
     if (refSet) {
-      // Calcul position relative du cube par rapport à l'utilisateur
+      // On met à jour la position du cube si la référence a changé
+      objGeoLat = latRef + objGeoLatOffset;
+      objGeoLon = lonRef;
+
+      // Coordonnées relatives
       const pos = latLonToMeters(latRef, lonRef, objGeoLat, objGeoLon);
 
-      // Rotation de la caméra selon orientation smartphone
+      // Rotation caméra en fonction orientation smartphone (axe Y)
       const headingRad = THREE.MathUtils.degToRad(userHeading);
 
-      // Position de la caméra au centre (0,0,0)
       camera.position.set(0, 0, 0);
       camera.rotation.set(0, 0, 0);
 
-      // On fait tourner la scène opposé à la direction pour simuler rotation
+      // On tourne la scène en sens inverse pour simuler la rotation du smartphone
       scene.rotation.y = -headingRad;
 
-      // Placer le cube
+      // Position cube
       cube.position.set(pos.x, 0, pos.z);
+
+      // Calcul frustum et visibilité
+      camera.updateMatrix();
+      camera.updateMatrixWorld();
+      camera.matrixWorldInverse.getInverse(camera.matrixWorld);
+
+      cameraViewProjectionMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(cameraViewProjectionMatrix);
+
+      cube.visible = frustum.containsPoint(cube.position);
     }
 
     renderer.render(scene, camera);
   }
   animate();
 
+  // Resize handler
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth/window.innerHeight;
