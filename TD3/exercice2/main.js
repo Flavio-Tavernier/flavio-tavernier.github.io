@@ -3,11 +3,18 @@ import * as L from 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.
 
 async function setupCameraVideo() {
   const video = document.getElementById('camvideo');
+  if (!video) {
+    alert("Élément vidéo introuvable dans le DOM (id='camvideo')");
+    return false;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     video.srcObject = stream;
+    await video.play();
+    return true;
   } catch (err) {
     alert('Erreur accès caméra : ' + err.message);
+    return false;
   }
 }
 
@@ -89,117 +96,118 @@ async function requestOrientationPermission() {
   }
 }
 
-async function main() {
+window.onload = () => {
   const coordsDiv = document.getElementById('coords');
+  const startBtn = document.getElementById('startBtn');
 
-  await setupCameraVideo();
+  startBtn.addEventListener('click', async () => {
+    startBtn.style.display = 'none'; // on cache le bouton
 
-  let userLat = 0;
-  let userLon = 0;
-  let userHeading = 0;
+    const cameraOk = await setupCameraVideo();
+    if (!cameraOk) {
+      coordsDiv.textContent = 'Impossible d\'accéder à la caméra';
+      return;
+    }
 
-  let refSet = false;
-  let latRef = 0;
-  let lonRef = 0;
+    let userLat = 0;
+    let userLon = 0;
+    let userHeading = 0;
 
-  try {
-    const pos = await requestGeolocationPermission();
-    userLat = pos.coords.latitude;
-    userLon = pos.coords.longitude;
-    latRef = userLat;
-    lonRef = userLon;
-    refSet = true;
+    let refSet = false;
+    let latRef = 0;
+    let lonRef = 0;
 
-    coordsDiv.textContent = `Position GPS initiale : ${latRef.toFixed(6)}, ${lonRef.toFixed(6)}`;
-  } catch (e) {
-    alert('Erreur ou refus permission géolocalisation : ' + e.message);
-    coordsDiv.textContent = 'Erreur géolocalisation';
-    return;
-  }
-
-  const map = setupMap();
-  map.setView([latRef, lonRef], 18);
-
-  const { renderer, scene, camera } = setupThree();
-
-  // Cube 3D rouge
-  const geometry = new THREE.BoxGeometry(1,1,1);
-  const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-  const cube = new THREE.Mesh(geometry, material);
-  scene.add(cube);
-
-  // Position cube à environ 5m au nord du point de référence
-  const objGeoLatOffset = 0.000045; // ~5m en latitude
-  let objGeoLat = latRef + objGeoLatOffset;
-  let objGeoLon = lonRef;
-
-  // Demande permission orientation puis écoute l'événement
-  const orientationAllowed = await requestOrientationPermission();
-  if (orientationAllowed) {
-    window.addEventListener('deviceorientationabsolute', (e) => {
-      if (e.absolute === true && e.alpha !== null) {
-        // Inversion de l'angle alpha pour que 0° soit au nord
-        userHeading = 360 - e.alpha;
-      }
-    });
-  }
-
-  navigator.geolocation.watchPosition(pos => {
-    userLat = pos.coords.latitude;
-    userLon = pos.coords.longitude;
-
-    if (!refSet) {
+    try {
+      const pos = await requestGeolocationPermission();
+      userLat = pos.coords.latitude;
+      userLon = pos.coords.longitude;
       latRef = userLat;
       lonRef = userLon;
-      map.setView([latRef, lonRef], 18);
       refSet = true;
+
+      coordsDiv.textContent = `Position GPS initiale : ${latRef.toFixed(6)}, ${lonRef.toFixed(6)}`;
+    } catch (e) {
+      alert('Erreur ou refus permission géolocalisation : ' + e.message);
+      coordsDiv.textContent = 'Erreur géolocalisation';
+      return;
     }
 
-    coordsDiv.textContent = `Position GPS : ${userLat.toFixed(6)}, ${userLon.toFixed(6)}`;
-    map.setView([userLat, userLon]);
-  }, err => {
-    console.error('Erreur géoloc:', err);
-    coordsDiv.textContent = 'Erreur géolocalisation';
-  }, {
-    enableHighAccuracy: true,
-    maximumAge: 1000
-  });
+    const map = setupMap();
+    map.setView([latRef, lonRef], 18);
 
-  function animate() {
-    requestAnimationFrame(animate);
+    const { renderer, scene, camera } = setupThree();
 
-    if (refSet) {
-      objGeoLat = latRef + objGeoLatOffset;
-      objGeoLon = lonRef;
+    // Cube 3D rouge
+    const geometry = new THREE.BoxGeometry(1,1,1);
+    const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const cube = new THREE.Mesh(geometry, material);
+    scene.add(cube);
 
-      const pos = latLonToMeters(latRef, lonRef, objGeoLat, objGeoLon);
+    // Position cube à environ 5m au nord du point de référence
+    const objGeoLatOffset = 0.000045; // ~5m en latitude
 
-      // Positionne la caméra au centre (origine)
-      camera.position.set(0, 0, 0);
-
-      // Applique la rotation selon l'orientation de l'utilisateur
-      camera.rotation.set(0, THREE.MathUtils.degToRad(userHeading), 0);
-
-      // Positionne le cube par rapport au point de référence
-      cube.position.set(pos.x, 0, pos.z);
-
-      // On peut forcer la visibilité pour le debug
-      cube.visible = true;
-
-      camera.updateMatrix();
-      camera.updateMatrixWorld();
+    // Demande permission orientation puis écoute l'événement
+    const orientationAllowed = await requestOrientationPermission();
+    if (orientationAllowed) {
+      window.addEventListener('deviceorientationabsolute', (e) => {
+        if (e.absolute === true && e.alpha !== null) {
+          userHeading = 360 - e.alpha; // Calibrage pour que 0° = Nord
+        }
+      });
+    } else {
+      coordsDiv.textContent += ' (Orientation non disponible)';
     }
 
-    renderer.render(scene, camera);
-  }
+    navigator.geolocation.watchPosition(pos => {
+      console.log('Position reçue:', pos.coords.latitude, pos.coords.longitude);
+      userLat = pos.coords.latitude;
+      userLon = pos.coords.longitude;
 
-  animate();
+      if (!refSet) {
+        latRef = userLat;
+        lonRef = userLon;
+        map.setView([latRef, lonRef], 18);
+        refSet = true;
+      }
 
-  window.addEventListener('resize', () => {
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
+      coordsDiv.textContent = `Position GPS : ${userLat.toFixed(6)}, ${userLon.toFixed(6)}`;
+      map.setView([userLat, userLon]);
+    }, err => {
+      console.error('Erreur géoloc:', err);
+      coordsDiv.textContent = 'Erreur géolocalisation: ' + err.message;
+    }, {
+      enableHighAccuracy: true,
+      maximumAge: 1000
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (refSet) {
+        const objGeoLat = latRef + objGeoLatOffset;
+        const objGeoLon = lonRef;
+
+        const pos = latLonToMeters(latRef, lonRef, objGeoLat, objGeoLon);
+
+        camera.position.set(0, 0, 0);
+        camera.rotation.set(0, THREE.MathUtils.degToRad(userHeading), 0);
+
+        cube.position.set(pos.x, 0, pos.z);
+        cube.visible = true;
+
+        camera.updateMatrix();
+        camera.updateMatrixWorld();
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+    });
   });
-}
-
-main();
+};
