@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Carte + Caméra iPhone — Gestes ml5.js</title>
+  <title>Carte + Caméra iPhone — Gestes ml5.js (👌🏻 pour zoom)</title>
 
   <!-- Leaflet CSS sans integrity -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -93,7 +93,7 @@
 
     <div class="camera-side">
       <div class="hud">
-        Gestes: <strong>Poing → Zoom+</strong> | <strong>Paume → Zoom−</strong>
+        Gestes: <strong>Poing → Zoom+</strong> | <strong>Paume → Zoom−</strong> | <strong>👌🏻 → Zoom+</strong>
       </div>
       <div class="status" id="status">Chargement modèle...</div>
 
@@ -205,7 +205,18 @@
     return sum / distancesHistory.length;
   }
 
-  function handleGesture(smoothed) {
+  function isOkGesture(landmarks) {
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    const wrist = landmarks[0];
+    const sizeRef = dist(wrist, landmarks[9]) || 1;
+
+    const distThumbIndex = dist(thumbTip, indexTip);
+    // On considère OK si le pouce et l'index sont proches (< 20% de la taille de la main)
+    return (distThumbIndex / sizeRef) < 0.20;
+  }
+
+  function handleGesture(smoothed, landmarks) {
     const now = Date.now();
     if (now - lastActionAt < GESTURE_COOLDOWN_MS) return;
 
@@ -213,6 +224,10 @@
       map.zoomIn(1);
       lastActionAt = now;
       statusEl.textContent = "Poing — Zoom +";
+    } else if (isOkGesture(landmarks)) {
+      map.zoomIn(1);
+      lastActionAt = now;
+      statusEl.textContent = "Geste OK — Zoom +";
     } else if (smoothed > OPEN_PALM_THRESHOLD) {
       map.zoomOut(1);
       lastActionAt = now;
@@ -270,7 +285,7 @@
         const analysis = analyzeHand(hand.landmarks);
         const smoothed = smoothDistance(analysis.normalizedTipDist);
         drawHand(hand.landmarks);
-        handleGesture(smoothed);
+        handleGesture(smoothed, hand.landmarks);
       }
     } else {
       overlayCtx.clearRect(0,0,overlay.width,overlay.height);
