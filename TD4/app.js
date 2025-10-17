@@ -1,5 +1,5 @@
-// Initialisation de la carte Leaflet
-const map = L.map('map').setView([48.8566, 2.3522], 13); // Paris par défaut
+// Initialisation Leaflet
+const map = L.map('map').setView([48.8566, 2.3522], 13);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap contributors'
@@ -12,9 +12,10 @@ let predictions = [];
 
 let lastX = null;
 let lastTime = Date.now();
+let isPalmOpen = false;
 
-// Détection de geste horizontal simple (main gauche/droite)
-function detectGesture() {
+// Détection de geste gauche/droite
+function detectSwipeGesture() {
   if (predictions.length > 0) {
     const x = predictions[0].landmarks[0][0]; // x du poignet
     const now = Date.now();
@@ -23,9 +24,9 @@ function detectGesture() {
       const deltaX = x - lastX;
 
       if (deltaX > 40) {
-        map.panBy([100, 0]); // mouvement vers la droite
+        map.panBy([100, 0]); // droite
       } else if (deltaX < -40) {
-        map.panBy([-100, 0]); // mouvement vers la gauche
+        map.panBy([-100, 0]); // gauche
       }
 
       lastTime = now;
@@ -35,10 +36,30 @@ function detectGesture() {
   }
 }
 
-// Dessin des points détectés sur le canvas
-function drawKeypoints(predictions, ctx) {
+// Détection de paume ouverte (méthode simple basée sur distance doigts-poignet)
+function detectOpenPalm(hand) {
+  const wrist = hand.landmarks[0];
+  const tips = [8, 12, 16, 20]; // extrémités des 4 doigts
+  let extendedFingers = 0;
+
+  tips.forEach(tipIndex => {
+    const tip = hand.landmarks[tipIndex];
+    const distance = Math.hypot(tip[0] - wrist[0], tip[1] - wrist[1]);
+
+    if (distance > 100) { // seuil empirique, à ajuster selon la distance caméra
+      extendedFingers++;
+    }
+  });
+
+  return extendedFingers >= 4;
+}
+
+// Affichage des points + message si paume détectée
+function drawAnnotations(predictions, ctx) {
   predictions.forEach(prediction => {
     const landmarks = prediction.landmarks;
+
+    // Dessine les points
     for (let i = 0; i < landmarks.length; i++) {
       const [x, y] = landmarks[i];
       ctx.beginPath();
@@ -46,10 +67,20 @@ function drawKeypoints(predictions, ctx) {
       ctx.fillStyle = "aqua";
       ctx.fill();
     }
+
+    // Détection paume ouverte
+    if (detectOpenPalm(prediction)) {
+      isPalmOpen = true;
+      ctx.font = "30px Arial";
+      ctx.fillStyle = "lime";
+      ctx.fillText("Paume détectée", 30, 50);
+    } else {
+      isPalmOpen = false;
+    }
   });
 }
 
-// Accès à la caméra (avec promesse)
+// Accès à la caméra
 async function setupCamera() {
   video = document.getElementById('video');
   const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -62,7 +93,7 @@ async function setupCamera() {
   });
 }
 
-// Démarrage principal après clic utilisateur
+// Main app
 async function main() {
   await setupCamera();
 
@@ -82,25 +113,22 @@ async function main() {
 
   function render() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawKeypoints(predictions, ctx);
-    detectGesture();
+    drawAnnotations(predictions, ctx);
+    detectSwipeGesture();
     requestAnimationFrame(render);
   }
 
   render();
 }
 
-// Démarrage après interaction utilisateur (iOS + Safari compatible)
+// Démarrage après clic (iOS compatible)
 document.getElementById("start-btn").addEventListener("click", () => {
-  // Affiche l'application et masque l'overlay
   document.getElementById("start-overlay").style.display = "none";
   document.querySelector(".container").style.display = "flex";
 
-  // Corrige le bug d'affichage de la carte grise
   setTimeout(() => {
-    map.invalidateSize(); // Redessine correctement la carte
+    map.invalidateSize();
   }, 100);
 
-  // Lance la détection de gestes
   main();
 });
