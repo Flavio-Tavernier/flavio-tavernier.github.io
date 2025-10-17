@@ -3,34 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Carte + Caméra</title>
-  <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-    }
-    #container {
-      display: flex;
-      width: 100vw;
-      height: 100vh;
-    }
-    #map, #camera-container {
-      width: 50%;
-      height: 100%;
-      position: relative;
-    }
-    #video, #canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-  </style>
-
-  <!-- Leaflet -->
+  <title>Carte + Reconnaissance Gestuelle</title>
+  <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 </head>
 <body>
@@ -42,94 +16,12 @@
     </div>
   </div>
 
+  <!-- Librairies -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
 
-  <script>
-    let map;
-    let video;
-    let handpose;
-    let predictions = [];
-
-    async function setupCamera() {
-      video = document.getElementById('video');
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false
-        });
-        video.srcObject = stream;
-        return new Promise(resolve => {
-          video.onloadedmetadata = () => resolve(video);
-        });
-      } catch (err) {
-        alert("Erreur d'accès à la caméra : " + err.message);
-      }
-    }
-
-    function initMap() {
-      map = L.map('map').setView([48.8566, 2.3522], 13); // Paris
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-      }).addTo(map);
-    }
-
-    function drawKeypoints(predictions, ctx) {
-      predictions.forEach(prediction => {
-        prediction.landmarks.forEach(point => {
-          ctx.beginPath();
-          ctx.arc(point[0], point[1], 5, 0, 2 * Math.PI);
-          ctx.fillStyle = "red";
-          ctx.fill();
-        });
-      });
-    }
-
-    function detectGestures(predictions) {
-      if (predictions.length > 0) {
-        const hand = predictions[0];
-        const wrist = hand.landmarks[0];
-        const index = hand.landmarks[8];
-        const dy = Math.abs(index[1] - wrist[1]);
-
-        if (dy < 50) {
-          map.zoomIn();
-        } else if (dy > 150) {
-          map.zoomOut();
-        }
-      }
-    }
-
-    async function main() {
-      await setupCamera();
-
-      const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      handpose = ml5.handpose(video, () => {
-        console.log("Handpose loaded");
-      });
-
-      handpose.on("predict", results => {
-        predictions = results;
-      });
-
-      function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawKeypoints(predictions, ctx);
-        detectGestures(predictions);
-        requestAnimationFrame(render);
-      }
-
-      render();
-      initMap();
-    }
-
-    main();
-  </script>
+  <!-- Script principal -->
+  <script src="script.js"></script>
 </body>
 </html>
