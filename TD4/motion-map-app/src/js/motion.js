@@ -1,8 +1,3 @@
-let handpose;
-let predictions = [];
-let lastZoomTime = 0;
-const ZOOM_COOLDOWN = 500;
-
 class HandDetector {
     constructor() {
         this.video = document.getElementById('video');
@@ -10,153 +5,95 @@ class HandDetector {
         this.gestureDisplay = document.getElementById('gesture-display');
         this.ctx = this.canvas.getContext('2d');
         this.handpose = null;
+        this.predictions = [];
     }
 
     async init() {
         try {
+            // Initialiser la caméra
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: 'user',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
+                video: { facingMode: 'user' }
             });
 
             this.video.srcObject = stream;
             await this.video.play();
 
+            // Configurer le canvas
             this.canvas.width = this.video.videoWidth;
             this.canvas.height = this.video.videoHeight;
 
-            this.handpose = ml5.handpose(this.video, {
-                flipHorizontal: true
-            }, () => {
-                console.log('Handpose model loaded');
+            // Initialiser handpose
+            this.handpose = ml5.handpose(this.video, () => {
+                console.log('Handpose prêt');
                 this.startDetection();
             });
         } catch (error) {
-            console.log('Camera initialization error:', error);
+            console.error('Erreur:', error);
+            this.updateGestureDisplay('Erreur caméra');
         }
     }
 
     startDetection() {
-        this.handpose.on('predict', (results) => {
-            predictions = results;
-            this.handlePredictions(results);
+        this.handpose.on('predict', predictions => {
+            this.predictions = predictions;
+            this.updateGestureDisplay(this.getGestureName(predictions));
         });
+
         this.animate();
     }
 
-    handlePredictions(predictions) {
-        if (predictions.length > 0) {
-            const hand = predictions[0];
-            const gesture = this.recognizeGesture(hand);
-            this.displayGesture(gesture);
-
-            if (gesture === 'palm' && this.canZoom() && window.map) {
-                const currentZoom = window.map.getZoom();
-                window.map.setZoom(currentZoom + 0.5);
-                lastZoomTime = Date.now();
-            }
-        } else {
-            this.displayGesture('Aucun geste détecté');
+    getGestureName(predictions) {
+        if (!predictions || predictions.length === 0) {
+            return 'Aucune main détectée 👋';
         }
-    }
 
-    recognizeGesture(hand) {
-        const palm = hand.annotations.palmBase[0];
-        const fingers = {
-            thumb: hand.annotations.thumb,
-            indexFinger: hand.annotations.indexFinger,
-            middleFinger: hand.annotations.middleFinger,
-            ringFinger: hand.annotations.ringFinger,
-            pinky: hand.annotations.pinky
-        };
-
-        // Détecter la paume ouverte
+        const hand = predictions[0];
         if (this.isPalmVisible(hand)) {
-            return 'palm';
+            return 'Paume détectée ✋';
         }
 
-        // Détecter le poing fermé
-        const allFingersClosed = Object.values(fingers).every(finger => 
-            this.isFingerClosed(finger, palm)
-        );
-        if (allFingersClosed) {
-            return 'fist';
-        }
-
-        // Détecter le pointage
-        const indexPointing = !this.isFingerClosed(fingers.indexFinger, palm) &&
-            Object.entries(fingers).every(([name, finger]) => 
-                name === 'indexFinger' || this.isFingerClosed(finger, palm)
-            );
-        if (indexPointing) {
-            return 'pointing';
-        }
-
-        return 'autre';
-    }
-
-    isFingerClosed(finger, palm) {
-        const tipToPalmDistance = Math.sqrt(
-            Math.pow(finger[3][0] - palm[0], 2) + 
-            Math.pow(finger[3][1] - palm[1], 2)
-        );
-        return tipToPalmDistance < 50;
+        return 'Main détectée 🤚';
     }
 
     isPalmVisible(hand) {
         const palm = hand.annotations.palmBase[0];
-        const middleFinger = hand.annotations.middleFinger[0];
+        const middle = hand.annotations.middleFinger[0];
         
         const distance = Math.sqrt(
-            Math.pow(palm[0] - middleFinger[0], 2) + 
-            Math.pow(palm[1] - middleFinger[1], 2)
+            Math.pow(palm[0] - middle[0], 2) + 
+            Math.pow(palm[1] - middle[1], 2)
         );
 
         return distance > 40;
     }
 
-    displayGesture(gesture) {
-        const gestureMessages = {
-            'palm': 'Paume ouverte ✋',
-            'fist': 'Poing fermé ✊',
-            'pointing': 'Doigt pointé ☝️',
-            'autre': 'Geste non reconnu 🤔',
-            'Aucun geste détecté': 'Aucun geste détecté 👀'
-        };
-
+    updateGestureDisplay(text) {
         if (this.gestureDisplay) {
-            this.gestureDisplay.textContent = gestureMessages[gesture] || gesture;
+            this.gestureDisplay.textContent = text;
         }
     }
 
-    canZoom() {
-        return Date.now() - lastZoomTime > ZOOM_COOLDOWN;
-    }
-
     animate() {
+        // Dessiner la vidéo
         this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
 
-        if (predictions.length > 0) {
-            this.drawHand(predictions[0]);
+        // Dessiner les points de la main
+        if (this.predictions.length > 0) {
+            const hand = this.predictions[0];
+            for (let keypoint of hand.landmarks) {
+                const [x, y] = keypoint;
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                this.ctx.fillStyle = 'red';
+                this.ctx.fill();
+            }
         }
 
         requestAnimationFrame(() => this.animate());
     }
-
-    drawHand(hand) {
-        for (let keypoint of hand.landmarks) {
-            const [x, y] = keypoint;
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, 5, 0, 2 * Math.PI);
-            this.ctx.fillStyle = 'red';
-            this.ctx.fill();
-        }
-    }
 }
 
+// Démarrer la détection quand la page est chargée
 document.addEventListener('DOMContentLoaded', () => {
     const detector = new HandDetector();
     detector.init();
