@@ -14,7 +14,7 @@ class CameraManager {
             this.canvas = document.getElementById('output_canvas');
             
             if (!this.video || !this.canvas) {
-                throw new Error('Required video or canvas elements not found');
+                throw new Error('Required elements not found');
             }
 
             this.ctx = this.canvas.getContext('2d');
@@ -32,24 +32,16 @@ class CameraManager {
                 };
             });
 
-            // Start video playback
             await this.video.play();
 
-            // Initialize ML5 PoseNet
-            this.poseNet = ml5.poseNet(this.video, () => {
-                console.log('PoseNet Model Loaded');
-            });
-
-            // Set up pose detection callback
-            this.poseNet.on('pose', (results) => {
-                this.poses = results;
-            });
-
-            // Start animation loop
+            // Start camera rendering loop
             this.animate();
 
+            // Initialize PoseNet separately
+            this.initializePoseNet();
+
         } catch (error) {
-            this.handleError(error);
+            console.error('Camera setup error:', error);
         }
     }
 
@@ -69,13 +61,21 @@ class CameraManager {
         }
     }
 
-    animate() {
-        this.drawVideoFrame();
-        this.drawPoses();
-        requestAnimationFrame(() => this.animate());
+    initializePoseNet() {
+        try {
+            this.poseNet = ml5.poseNet(this.video, () => {
+                console.log('PoseNet Model Loaded');
+            });
+
+            this.poseNet.on('pose', (results) => {
+                this.poses = results;
+            });
+        } catch (error) {
+            console.error('PoseNet initialization error:', error);
+        }
     }
 
-    drawVideoFrame() {
+    animate() {
         if (this.ctx && this.video) {
             this.ctx.drawImage(
                 this.video, 
@@ -84,15 +84,17 @@ class CameraManager {
                 this.canvas.height
             );
         }
+
+        if (this.poses.length > 0) {
+            this.drawPoses();
+        }
+
+        requestAnimationFrame(() => this.animate());
     }
 
     drawPoses() {
-        if (!this.ctx || this.poses.length === 0) return;
-
-        // Draw detected poses
         this.poses.forEach(pose => {
             if (pose.pose.score > 0.2) {
-                // Draw keypoints
                 pose.pose.keypoints.forEach(keypoint => {
                     if (keypoint.score > 0.2) {
                         this.ctx.beginPath();
@@ -107,34 +109,6 @@ class CameraManager {
                 });
             }
         });
-    }
-
-    handleError(error) {
-        console.error('Camera Error:', error);
-        
-        let message = 'Une erreur est survenue lors de l\'accès à la caméra.';
-        
-        switch (error.name) {
-            case 'NotAllowedError':
-                message = 'Veuillez autoriser l\'accès à la caméra dans les paramètres de votre navigateur.';
-                break;
-            case 'NotFoundError':
-                message = 'Aucune caméra n\'a été trouvée sur votre appareil.';
-                break;
-            case 'NotReadableError':
-                message = 'La caméra est peut-être utilisée par une autre application.';
-                break;
-            case 'OverconstrainedError':
-                message = 'Les paramètres demandés pour la caméra ne sont pas supportés.';
-                break;
-        }
-
-        // Add error message to DOM
-        const cameraArea = document.querySelector('.camera-area');
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'camera-error';
-        errorDiv.textContent = message;
-        cameraArea.appendChild(errorDiv);
     }
 }
 
