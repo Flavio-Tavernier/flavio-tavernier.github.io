@@ -1,0 +1,21 @@
+body {
+    margin: 0;
+    padding: 0;
+}
+
+#map {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#video {
+    position: fixed;
+    right: 10px;
+    bottom: 10px;
+    width: 320px;
+    height: 240px;
+    z-index: 1000;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "motion-map-app",
+  "version": "1.0.0",
+  "description": "A web application that uses Leaflet for mapping and ml5.js for motion recognition through the webcam.",
+  "main": "src/js/main.js",
+  "scripts": {
+    "start": "live-server src",
+    "build": "echo 'Build step not defined'"
+  },
+  "dependencies": {
+    "leaflet": "^1.7.1",
+    "ml5": "^0.6.0"
+  },
+  "author": "Your Name",
+  "license": "MIT"
+}
