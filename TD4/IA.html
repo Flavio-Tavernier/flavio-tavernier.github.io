@@ -1,27 +1,346 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Carte + Reconnaissance Gestuelle</title>
-  <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Carte + Caméra iPhone — Gestes ml5.js</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+g1Xk0s3b1f3pGQvI0V8b+qv9nF6A4Gk9gXg9e+3s=" crossorigin=""/>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: #111;
+      color: #eee;
+    }
+
+    /* Split screen */
+    .split {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    #map {
+      flex: 1 1 50%;
+      height: 100%;
+      min-width: 280px;
+    }
+
+    .camera-side {
+      flex: 1 1 50%;
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    video#video {
+      /* Mirror to feel natural for front camera */
+      transform: scaleX(-1);
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    canvas#overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none; /* let clicks pass */
+    }
+
+    .hud {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      background: rgba(0,0,0,0.4);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      backdrop-filter: blur(4px);
+    }
+
+    .status {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      background: rgba(0,0,0,0.4);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      text-align: right;
+    }
+
+    /* small mobile tweaks */
+    @media (max-width: 600px) {
+      .split { flex-direction: column; }
+      #map, .camera-side { height: 50vh; }
+    }
+  </style>
 </head>
 <body>
-  <div id="container">
+  <div class="split">
     <div id="map"></div>
-    <div id="camera-container">
-      <video id="video" autoplay playsinline></video>
-      <canvas id="canvas"></canvas>
+
+    <div class="camera-side">
+      <div class="hud">
+        Gestes: <strong>Poing → Zoom+</strong> | <strong>Paume → Zoom−</strong>
+      </div>
+      <div class="status" id="status">Chargement modèle...</div>
+
+      <!-- video feed -->
+      <video id="video" autoplay playsinline muted></video>
+      <!-- canvas to draw keypoints -->
+      <canvas id="overlay"></canvas>
     </div>
   </div>
 
-  <!-- Librairies -->
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
-  <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+  <!-- Dependencies: Leaflet, p5 (ml5 dépend parfois), ml5.js -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1jRkF0nG1qfK1f72t7+Yw6bK3Q5tZc1a6q9o8y+8=" crossorigin=""></script>
 
-  <!-- Script principal -->
-  <script src="script.js"></script>
+  <!-- p5 is often required by ml5; include the minified non-module build -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+
+  <!-- ml5.js (handpose) -->
+  <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
+
+  <script>
+  // === Configuration ===
+  const VIDEO_WIDTH = 640;
+  const VIDEO_HEIGHT = 480;
+  const OPEN_PALM_THRESHOLD = 0.32;   // moyenne distance normalisée (à ajuster)
+  const CLOSED_FIST_THRESHOLD = 0.22; // si < ceci => poing
+  const SMOOTHING_WINDOW = 6;         // frames pour moyenne mobile
+  const GESTURE_COOLDOWN_MS = 700;    // délai entre actions successives
+
+  // === Leaflet map initialisation ===
+  const map = L.map('map').setView([48.8566, 2.3522], 12); // Paris par défaut
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // optional: marker center
+  const centerMarker = L.circleMarker(map.getCenter(), {radius:6, color:'#ff5722'}).addTo(map);
+
+  map.on('move', () => {
+    centerMarker.setLatLng(map.getCenter());
+  });
+
+  // === Video and ml5 Handpose setup ===
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const overlayCtx = overlay.getContext('2d');
+  const statusEl = document.getElementById('status');
+
+  overlay.width = VIDEO_WIDTH;
+  overlay.height = VIDEO_HEIGHT;
+
+  let handposeModel = null;
+  let latestPredictions = [];
+  let distancesHistory = []; // for smoothing
+  let lastActionAt = 0;
+
+  // util: compute euclidean distance
+  function dist(a, b) {
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+
+  // start camera (front camera for iPhone: facingMode user)
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          width: { ideal: VIDEO_WIDTH },
+          height: { ideal: VIDEO_HEIGHT },
+          facingMode: "user" // change to "environment" for rear camera
+        }
+      });
+      video.srcObject = stream;
+      await video.play();
+      // ensure overlay size matches displayed video size
+      overlay.width = video.videoWidth || VIDEO_WIDTH;
+      overlay.height = video.videoHeight || VIDEO_HEIGHT;
+      statusEl.textContent = "Caméra prête — chargement du modèle...";
+    } catch (err) {
+      console.error("Erreur caméra:", err);
+      statusEl.textContent = "Erreur accès caméra: " + (err.message || err);
+    }
+  }
+
+  // load ml5 handpose
+  async function loadHandpose() {
+    // ml5.handpose returns a model that gives landmarks for hands
+    handposeModel = await ml5.handpose(video, () => {
+      console.log("handpose ready");
+      statusEl.textContent = "Modèle chargé — détecte les gestes...";
+    });
+
+    // on 'predict' events
+    handposeModel.on('hand', results => {
+      // results is array of detected hands - each contains landmarks
+      latestPredictions = results;
+    });
+  }
+
+  // normalize distances by hand size: use distance between wrist (0) and middle-finger MCP (9)
+  function analyzeHand(landmarks) {
+    // landmarks: array of 21 [x,y,z] coords in video pixel space (x right, y down)
+    // Tips indices: 4 (thumb), 8 (index), 12 (middle), 16 (ring), 20 (pinky)
+    const wrist = landmarks[0];
+    const tipIndices = [4,8,12,16,20];
+    // compute hand size baseline
+    const sizeRef = dist(landmarks[0], landmarks[9]) || 1; // wrist to middle mcp
+    // distances from tips to wrist
+    const dists = tipIndices.map(i => dist(landmarks[i], wrist));
+    const avg = dists.reduce((a,b) => a+b, 0) / dists.length;
+    const normalized = avg / sizeRef;
+    return {
+      normalizedTipDist: normalized,
+      rawTipDists: dists,
+      wrist,
+      landmarks
+    };
+  }
+
+  // smoothing using moving average
+  function smoothDistance(value) {
+    distancesHistory.push(value);
+    if (distancesHistory.length > SMOOTHING_WINDOW) distancesHistory.shift();
+    const sum = distancesHistory.reduce((a,b) => a+b, 0);
+    return sum / distancesHistory.length;
+  }
+
+  // gesture decision and map control
+  function handleGesture(smoothed) {
+    const now = Date.now();
+    // if cooldown active, ignore
+    if (now - lastActionAt < GESTURE_COOLDOWN_MS) return;
+
+    if (smoothed < CLOSED_FIST_THRESHOLD) {
+      // poing => zoom in
+      console.log("Poing détecté (zoom in)", smoothed);
+      map.zoomIn(1);
+      lastActionAt = now;
+      statusEl.textContent = "Poing — Zoom +";
+    } else if (smoothed > OPEN_PALM_THRESHOLD) {
+      // paume => zoom out
+      console.log("Paume détectée (zoom out)", smoothed);
+      map.zoomOut(1);
+      lastActionAt = now;
+      statusEl.textContent = "Paume — Zoom −";
+    } else {
+      // état neutre (entre les seuils)
+      statusEl.textContent = "Aucun geste net";
+    }
+  }
+
+  // draw landmarks on overlay
+  function drawHand(landmarks) {
+    const ctx = overlayCtx;
+    ctx.clearRect(0,0,overlay.width, overlay.height);
+
+    if (!landmarks) return;
+    ctx.save();
+    ctx.scale(1,1);
+    ctx.lineWidth = 2;
+    // draw connections (simple)
+    const lines = [
+      [0,1,2,3,4], // thumb
+      [0,5,6,7,8], // index
+      [0,9,10,11,12], // middle
+      [0,13,14,15,16], // ring
+      [0,17,18,19,20] // pinky
+    ];
+    ctx.strokeStyle = 'rgba(0,150,255,0.9)';
+    lines.forEach(segment => {
+      ctx.beginPath();
+      segment.forEach((i, idx) => {
+        const x = overlay.width - landmarks[i][0]; // mirror for display to match mirrored video
+        const y = landmarks[i][1];
+        if (idx === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+    });
+
+    // draw keypoints
+    ctx.fillStyle = 'rgba(255,200,0,0.9)';
+    landmarks.forEach((pt, i) => {
+      const x = overlay.width - pt[0];
+      const y = pt[1];
+      ctx.beginPath();
+      ctx.arc(x,y,4,0,Math.PI*2);
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+
+  // main loop: periodically check predictions and react
+  function loop() {
+    // keep overlay canvas same size as video element
+    if (video && video.videoWidth) {
+      if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+      }
+    }
+
+    if (latestPredictions && latestPredictions.length > 0) {
+      // use first detected hand
+      const hand = latestPredictions[0];
+      if (hand && hand.landmarks) {
+        const analysis = analyzeHand(hand.landmarks);
+        const smoothed = smoothDistance(analysis.normalizedTipDist);
+        // draw landmarks
+        drawHand(hand.landmarks);
+        // handle gesture mapping
+        handleGesture(smoothed);
+        // optionally show numeric
+        // console.log("norm", analysis.normalizedTipDist, "smoothed", smoothed);
+      }
+    } else {
+      // clear overlay
+      overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+      statusEl.textContent = "Aucune main détectée";
+      // reset history so when new hand appears we don't have stale values
+      // (but keep last few for mild smoothing)
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  // kick things off
+  (async () => {
+    await startCamera();
+    await loadHandpose();
+    distancesHistory = [];
+    lastActionAt = 0;
+    loop();
+  })();
+
+  // ===== Notes for adaptation =====
+  // - Pour ajouter d'autres gestes (ex: doigt pointé pour pan), calculez
+  //   les distances relatives et la position du bout de l'index (landmark 8)
+  //   et translatez la carte via map.panBy([dx, dy]) ou map.panTo(latlng).
+  // - Pour utiliser la caméra arrière sur iPhone, remplacer facingMode:"user"
+  //   par "environment". Certains navigateurs iOS préfèrent deviceId selection.
+  // - Ajustez OPEN_PALM_THRESHOLD / CLOSED_FIST_THRESHOLD selon la caméra/variations.
+  </script>
 </body>
 </html>
