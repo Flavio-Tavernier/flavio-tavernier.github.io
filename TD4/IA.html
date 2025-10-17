@@ -10,16 +10,22 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <!-- ml5.js (Handpose via TensorFlow.js) -->
+  <!-- ml5.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/addons/p5.dom.min.js"></script>
   <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
 </head>
 <body>
-  <div class="container">
+  <!-- Overlay de démarrage -->
+  <div id="start-overlay">
+    <button id="start-btn">Lancer l'application</button>
+  </div>
+
+  <!-- Contenu principal caché au départ -->
+  <div class="container" style="display: none;">
     <div id="map"></div>
     <div id="video-container">
-      <video id="video" autoplay playsinline></video>
+      <video id="video" autoplay playsinline muted></video>
       <canvas id="output"></canvas>
     </div>
   </div>
